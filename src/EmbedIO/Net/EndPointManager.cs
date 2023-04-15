@@ -79,28 +79,36 @@ namespace EmbedIO.Net
             }
 
             // listens on all the interfaces if host name cannot be parsed by IPAddress.
-            var epl = GetEpListener(lp.Host, lp.Port, listener, lp.Secure);
-            epl.AddPrefix(lp, listener);
+            var endPointListeners = GetEpListeners(lp.Host, lp.Port, listener, lp.Secure);
+            foreach (var epl in endPointListeners) {
+                epl.AddPrefix(lp, listener);
+            }
         }
 
-        private static EndPointListener GetEpListener(string host, int port, HttpListener listener, bool secure = false)
+        private static IEnumerable<EndPointListener> GetEpListeners(string host, int port, HttpListener listener, bool secure = false)
         {
-            var address = ResolveAddress(host);
+            var addresses = ResolveAddresses(host);
+            var endPointListeners = new List<EndPointListener>();
 
-            var p = IPToEndpoints.GetOrAdd(address, x => new ConcurrentDictionary<int, EndPointListener>());
-            return p.GetOrAdd(port, x => new EndPointListener(listener, address, x, secure));
+            foreach (var address in addresses)
+            {
+                var p = IPToEndpoints.GetOrAdd(address, x => new ConcurrentDictionary<int, EndPointListener>());
+                endPointListeners.Add(p.GetOrAdd(port, x => new EndPointListener(listener, address, x, secure)));
+            }
+
+            return endPointListeners;
         }
 
-        private static IPAddress ResolveAddress(string host)
+        private static IEnumerable<IPAddress> ResolveAddresses(string host)
         {
             if (host == "*" || host == "+" || host == "0.0.0.0")
             {
-                return UseIpv6 ? IPAddress.IPv6Any : IPAddress.Any;
+                return new[] { UseIpv6 ? IPAddress.IPv6Any : IPAddress.Any };
             }
 
             if (IPAddress.TryParse(host, out var address))
             {
-                return address;
+                return new[] { address };
             }
 
             try
@@ -110,11 +118,10 @@ namespace EmbedIO.Net
                     AddressList = Dns.GetHostAddresses(host),
                 };
 
-                return hostEntry.AddressList[0];
+                return hostEntry.AddressList;
             }
-            catch
-            {
-                return UseIpv6 ? IPAddress.IPv6Any : IPAddress.Any;
+            catch {
+                return new[] {UseIpv6 ? IPAddress.IPv6Any : IPAddress.Any};
             }
         }
 
@@ -129,8 +136,10 @@ namespace EmbedIO.Net
                     return;
                 }
 
-                var epl = GetEpListener(lp.Host, lp.Port, listener, lp.Secure);
-                epl.RemovePrefix(lp);
+                var epls = GetEpListeners(lp.Host, lp.Port, listener, lp.Secure);
+                foreach (var epl in epls) {
+                    epl.RemovePrefix(lp);
+                }
             }
             catch (SocketException)
             {
